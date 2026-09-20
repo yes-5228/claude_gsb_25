@@ -69,3 +69,24 @@ class DashboardStats(BaseModel):
     top_restrooms: list[RestroomRankItem] = Field(default_factory=list)
     recent_issues: list[IssueOut] = Field(default_factory=list)
     recent_inspections: list[InspectionOut] = Field(default_factory=list)
+
+
+class ShiftScoreRow(BaseModel):
+    """单个班次的均分对比行：原始均分 + 按可比项目折算的均分。"""
+
+    shift: str
+    inspection_count: int = 0
+    checklist_item_count: int = Field(default=0, description="该班次现行组合的检查项数")
+    avg_score: float = Field(default=0.0, description="原始均分（按各记录自身组合算分）")
+    comparable_count: int = Field(default=0, description="参与可比折算的记录数")
+    comparable_avg_score: float = Field(default=0.0, description="可比均分（仅按可比项目折算）")
+
+
+class ShiftComparison(BaseModel):
+    """跨班次均分对比：可比项目集合固定，折算规则随结果一并返回。"""
+
+    comparable_items: list[str] = Field(
+        default_factory=list, description="可比项目：各班次现行组合的交集"
+    )
+    rule_note: str = Field(description="折算规则说明")
+    shifts: list[ShiftScoreRow] = Field(default_factory=list)

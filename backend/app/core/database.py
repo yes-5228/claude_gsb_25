@@ -56,3 +56,19 @@ def init_db() -> None:
     from app import models  # noqa: F401  确保模型完成注册
 
     Base.metadata.create_all(bind=engine)
+    _ensure_legacy_columns()
+
+
+def _ensure_legacy_columns() -> None:
+    """为已存在的旧库补充新增列（create_all 不会修改已有表）。"""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    if "inspections" not in set(inspector.get_table_names()):
+        return
+    columns = {column["name"] for column in inspector.get_columns("inspections")}
+    if "checklist_version_id" not in columns:
+        with engine.begin() as connection:
+            connection.execute(
+                text("ALTER TABLE inspections ADD COLUMN checklist_version_id INTEGER")
+            )

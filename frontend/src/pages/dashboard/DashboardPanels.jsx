@@ -120,6 +120,42 @@ export function RankingPanel({ items }) {
   );
 }
 
+export function ShiftComparisonPanel({ data }) {
+  if (!data) return null;
+  return (
+    <section className="card">
+      <div className="card-title">
+        <h3>班次均分对比</h3>
+        <span className="hint">可比项目：{data.comparable_items?.join('、') || '无'}</span>
+      </div>
+      <DataTable
+        columns={[
+          { key: 'shift', title: '班次' },
+          { key: 'inspection_count', title: '记录数' },
+          { key: 'checklist_item_count', title: '检查项数' },
+          {
+            key: 'avg_score',
+            title: '原始均分',
+            render: (row) => (row.inspection_count ? <ScorePill score={row.avg_score} /> : '-'),
+          },
+          {
+            key: 'comparable_avg_score',
+            title: '可比均分',
+            render: (row) =>
+              row.comparable_count ? <ScorePill score={row.comparable_avg_score} /> : '-',
+          },
+        ]}
+        rows={data.shifts || []}
+        rowKey={(row) => row.shift}
+        emptyText="暂无巡查记录"
+      />
+      <p className="hint" style={{ marginTop: 8, lineHeight: 1.6 }}>
+        {data.rule_note}
+      </p>
+    </section>
+  );
+}
+
 export function RecentIssuesPanel({ items }) {
   return (
     <section className="card">

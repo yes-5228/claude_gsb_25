@@ -32,10 +32,12 @@ export default function InspectionFormModal({ defaultRestroomId, onClose, onSave
       .catch((err) => setError(err.message));
   }, []);
 
+  // 切换班次时按该班次的当前组合重建检查项，保证一条记录整体按同一组合展开
   useEffect(() => {
-    const template = dictionaries?.inspection_check_items || [];
-    setItems(template.map((name) => ({ name, score: 9, remark: '' })));
-  }, [dictionaries]);
+    const checklists = dictionaries?.shift_checklists || {};
+    const names = checklists[form.shift] || dictionaries?.inspection_check_items || [];
+    setItems(names.map((name) => ({ name, score: 9, remark: '' })));
+  }, [dictionaries, form.shift]);
 
   const score = useMemo(() => calcScore(items), [items]);
   const grade = gradeOf(score);
@@ -141,7 +143,7 @@ export default function InspectionFormModal({ defaultRestroomId, onClose, onSave
 
       <div className="card-title">
         <div className="inline">
-          <h3>检查项评分（每项 0-10 分）</h3>
+          <h3>检查项评分（{form.shift}组合 · {items.length} 项，每项 0-10 分）</h3>
           <span className="tag tag-primary">当前得分 {score.toFixed(1)}</span>
           <GradeTag grade={grade} />
           <StatusTag status={result} />

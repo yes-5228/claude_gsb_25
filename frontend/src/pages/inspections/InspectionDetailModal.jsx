@@ -31,6 +31,12 @@ export default function InspectionDetailModal({ inspection, onClose, onReportIss
           { label: '巡查时间', value: formatDateTime(inspection.inspect_time) },
           { label: '巡查人', value: inspection.inspector },
           { label: '班次', value: inspection.shift },
+          {
+            label: '检查项组合',
+            value: inspection.checklist_version
+              ? `v${inspection.checklist_version} · ${(inspection.items || []).length} 项`
+              : `旧版记录 · ${(inspection.items || []).length} 项`,
+          },
           { label: '得分', value: <ScorePill score={inspection.score} /> },
           { label: '评分等级', value: <GradeTag grade={inspection.grade} /> },
           { label: '巡查结论', value: <StatusTag status={inspection.result} /> },

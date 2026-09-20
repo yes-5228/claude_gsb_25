@@ -46,7 +46,8 @@ def restroom(client) -> dict:
     return response.json()
 
 
-def full_items(score: float = 9.0) -> list[dict]:
-    from app.core.constants import INSPECTION_CHECK_ITEMS
+def full_items(score: float = 9.0, shift: str = "早班") -> list[dict]:
+    """按班次当前默认组合生成打分明细。"""
+    from app.core.constants import DEFAULT_SHIFT_CHECKLISTS
 
-    return [{"name": name, "score": score} for name in INSPECTION_CHECK_ITEMS]
+    return [{"name": name, "score": score} for name in DEFAULT_SHIFT_CHECKLISTS[shift]]

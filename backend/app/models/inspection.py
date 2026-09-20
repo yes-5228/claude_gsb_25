@@ -24,6 +24,12 @@ class Inspection(Base):
         DateTime, default=datetime.now, index=True, comment="巡查时间"
     )
     shift: Mapped[str] = mapped_column(String(20), default=Shift.MORNING.value, comment="班次")
+    checklist_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("checklist_versions.id"),
+        nullable=True,
+        index=True,
+        comment="提交时使用的检查项组合版本；为空表示组合功能上线前的历史记录",
+    )
     items: Mapped[list[dict]] = mapped_column(JSON, default=list, comment="检查项打分明细")
     score: Mapped[float] = mapped_column(Float, default=0.0, comment="巡查得分")
     grade: Mapped[str] = mapped_column(String(20), default="", comment="评分等级")
@@ -35,3 +41,4 @@ class Inspection(Base):
 
     restroom: Mapped["Restroom"] = relationship(back_populates="inspections")  # noqa: F821
     issues: Mapped[list["Issue"]] = relationship(back_populates="inspection")  # noqa: F821
+    checklist: Mapped["ChecklistVersion | None"] = relationship()  # noqa: F821

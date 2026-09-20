@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import DomainError, NotFoundError
 from app.models import Inspection, Restroom
 from app.schemas.inspection import InspectionCreate, InspectionOut, InspectionUpdate
-from app.services import restroom_service, scoring
+from app.services import checklist_service, restroom_service, scoring
 
 SORTABLE_FIELDS = {
     "inspect_time": Inspection.inspect_time,
@@ -18,7 +18,13 @@ SORTABLE_FIELDS = {
 }
 
 
-def _normalize_items(items: list) -> list[dict]:
+def _normalize_items(items: list, expected_names: list[str] | None = None) -> list[dict]:
+    """校验并展开打分明细。
+
+    指定 expected_names（班次组合）时，提交的项必须与组合完全一致：
+    缺项、含组合外项目都会拒绝，并按组合顺序展开，
+    保证同一条巡查整体按同一个组合版本展开，不混用新旧组合。
+    """
     if not items:
         raise DomainError("巡查检查项不能为空")
     normalized: list[dict] = []
@@ -34,6 +40,20 @@ def _normalize_items(items: list) -> list[dict]:
         normalized.append(
             {"name": name, "score": float(data.get("score", 0)), "remark": data.get("remark")}
         )
+    if expected_names is not None:
+        expected = list(dict.fromkeys(expected_names))
+        allowed = set(expected)
+        missing = [name for name in expected if name not in seen]
+        extra = [name for name in seen if name not in allowed]
+        if missing or extra:
+            parts = []
+            if missing:
+                parts.append("缺少：" + "、".join(missing))
+            if extra:
+                parts.append("非本组合：" + "、".join(extra))
+            raise DomainError("检查项须与班次当前组合完全一致（" + "；".join(parts) + "）")
+        order = {name: index for index, name in enumerate(expected)}
+        normalized.sort(key=lambda entry: order[entry["name"]])
     return normalized
 
 
@@ -47,6 +67,7 @@ def get_inspection(db: Session, inspection_id: int) -> Inspection:
 def to_out(inspection: Inspection) -> InspectionOut:
     data = InspectionOut.model_validate(inspection)
     data.issue_count = len(inspection.issues)
+    data.checklist_version = inspection.checklist.version if inspection.checklist else None
     return data
 
 
@@ -102,12 +123,16 @@ def list_inspections(
 
 def create_inspection(db: Session, payload: InspectionCreate) -> Inspection:
     restroom_service.get_restroom(db, payload.restroom_id)
-    items = _normalize_items(payload.items)
+    shift = payload.shift.value if hasattr(payload.shift, "value") else payload.shift
+    # 以提交时刻班次的当前组合为准展开，并绑定该组合版本作为快照锚点
+    checklist = checklist_service.current_version(db, shift)
+    items = _normalize_items(payload.items, checklist.items)
     score, grade, result = scoring.evaluate(items)
     inspection = Inspection(
         restroom_id=payload.restroom_id,
         inspector=payload.inspector,
-        shift=payload.shift.value if hasattr(payload.shift, "value") else payload.shift,
+        shift=shift,
+        checklist_version_id=checklist.id,
         inspect_time=payload.inspect_time or datetime.now(),
         items=items,
         score=score,
@@ -125,17 +150,36 @@ def create_inspection(db: Session, payload: InspectionCreate) -> Inspection:
 def update_inspection(db: Session, inspection_id: int, payload: InspectionUpdate) -> Inspection:
     inspection = get_inspection(db, inspection_id)
     data = payload.model_dump(exclude_unset=True)
+    new_shift = None
+    if data.get("shift") is not None and payload.shift is not None:
+        new_shift = payload.shift.value if hasattr(payload.shift, "value") else payload.shift
+    shift_changed = new_shift is not None and new_shift != inspection.shift
     if data.get("items") is not None:
-        items = _normalize_items(payload.items or [])
+        checklist = None
+        if shift_changed:
+            # 换班次即换组合：按新班次当前组合校验展开，并重新绑定版本
+            checklist = checklist_service.current_version(db, new_shift)
+            expected = checklist.items
+        elif inspection.checklist is not None:
+            # 项集合必须仍属于提交时绑定的组合版本，不能混入新组合的项目
+            expected = inspection.checklist.items
+        else:
+            # 组合功能上线前的历史记录：项集合维持自身快照，只允许改分数
+            expected = [item["name"] for item in inspection.items]
+        items = _normalize_items(payload.items or [], expected)
         score, grade, result = scoring.evaluate(items)
         inspection.items = items
         inspection.score = score
         inspection.grade = grade
         inspection.result = result
+        if checklist is not None:
+            inspection.checklist_version_id = checklist.id
+    elif shift_changed:
+        raise DomainError("调整班次需同时按新班次当前的检查项组合重新提交各项打分")
+    if shift_changed:
+        inspection.shift = new_shift
     if data.get("inspector") is not None:
         inspection.inspector = payload.inspector or inspection.inspector
-    if data.get("shift") is not None and payload.shift is not None:
-        inspection.shift = payload.shift.value if hasattr(payload.shift, "value") else payload.shift
     if data.get("inspect_time") is not None and payload.inspect_time is not None:
         inspection.inspect_time = payload.inspect_time
     if "remark" in data:

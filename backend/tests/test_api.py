@@ -10,6 +10,8 @@ def test_health_and_dictionaries(client):
     payload = client.get("/api/v1/meta/dictionaries").json()
     assert "待整改" in payload["issue_status"]
     assert len(payload["inspection_check_items"]) == 8
+    assert set(payload["shift_checklists"]) == {"早班", "中班", "晚班"}
+    assert payload["shift_checklists"]["早班"] != payload["shift_checklists"]["晚班"]
     assert payload["issue_transitions"]["待整改"] == ["整改中", "已关闭"]
 
 
@@ -54,7 +56,7 @@ def test_inspection_scoring_and_filter(client, restroom):
             "restroom_id": restroom["id"],
             "inspector": "李巡查",
             "shift": "中班",
-            "items": full_items(9),
+            "items": full_items(9, "中班"),
             "remark": "整体良好",
         },
     ).json()
@@ -62,7 +64,7 @@ def test_inspection_scoring_and_filter(client, restroom):
     assert good["grade"] == "优秀"
     assert good["result"] == "正常"
 
-    bad_items = full_items(9)
+    bad_items = full_items(9, "晚班")
     bad_items[0]["score"] = 3
     bad_items[0]["remark"] = "地面污渍"
     bad = client.post(
@@ -223,3 +225,158 @@ def test_dashboard_stats(client, restroom):
     }
     assert payload["top_restrooms"]
     assert "rectification_rate" in overview
+
+
+def test_shift_checklists_versioning(client, restroom):
+    # 各班次默认组合不同，初始版本均为 v1
+    checklists = client.get("/api/v1/meta/checklists").json()
+    by_shift = {row["shift"]: row for row in checklists}
+    assert set(by_shift) == {"早班", "中班", "晚班"}
+    assert all(row["version"] == 1 for row in checklists)
+    assert by_shift["早班"]["items"] != by_shift["晚班"]["items"]
+    morning_items = by_shift["早班"]["items"]
+
+    # 组合外的项目提交被拒（通风除臭不在早班默认组合内）
+    extra = full_items(9, "早班") + [{"name": "通风除臭", "score": 8}]
+    response = client.post(
+        "/api/v1/inspections",
+        json={
+            "restroom_id": restroom["id"],
+            "inspector": "李巡查",
+            "shift": "早班",
+            "items": extra,
+        },
+    )
+    assert response.status_code == 400
+
+    # 缺项同样被拒
+    response = client.post(
+        "/api/v1/inspections",
+        json={
+            "restroom_id": restroom["id"],
+            "inspector": "李巡查",
+            "shift": "早班",
+            "items": full_items(9, "早班")[1:],
+        },
+    )
+    assert response.status_code == 400
+
+    # 正常创建：绑定 v1，按组合顺序展开
+    created = client.post(
+        "/api/v1/inspections",
+        json={
+            "restroom_id": restroom["id"],
+            "inspector": "李巡查",
+            "shift": "早班",
+            "items": full_items(9, "早班"),
+        },
+    ).json()
+    assert created["checklist_version"] == 1
+    assert [item["name"] for item in created["items"]] == morning_items
+    assert created["score"] == 90.0
+
+    # 调整早班组合 → 生成 v2，只对之后的录入生效
+    new_items = ["地面与台阶清洁", "便池蹲位清洁", "垃圾清运"]
+    updated = client.put("/api/v1/meta/checklists/早班", json={"items": new_items}).json()
+    assert updated["version"] == 2
+    assert updated["items"] == new_items
+
+    # 新录入按 v2 校验展开；仍按旧组合提交会被拒绝
+    newer = client.post(
+        "/api/v1/inspections",
+        json={
+            "restroom_id": restroom["id"],
+            "inspector": "李巡查",
+            "shift": "早班",
+            "items": [{"name": name, "score": 10} for name in new_items],
+        },
+    ).json()
+    assert newer["checklist_version"] == 2
+    assert [item["name"] for item in newer["items"]] == new_items
+    assert newer["score"] == 100.0
+
+    stale = client.post(
+        "/api/v1/inspections",
+        json={
+            "restroom_id": restroom["id"],
+            "inspector": "李巡查",
+            "shift": "早班",
+            "items": full_items(9, "早班"),
+        },
+    )
+    assert stale.status_code == 400
+
+    # 历史记录仍按提交时的组合展示与算分
+    old = client.get(f"/api/v1/inspections/{created['id']}").json()
+    assert old["checklist_version"] == 1
+    assert [item["name"] for item in old["items"]] == morning_items
+    assert old["score"] == 90.0
+
+    # 旧记录改分：项集合必须仍是原组合，不能混入新组合的项目
+    rejected = client.patch(
+        f"/api/v1/inspections/{created['id']}",
+        json={"items": [{"name": name, "score": 8} for name in new_items]},
+    )
+    assert rejected.status_code == 400
+
+    # 单独改班次被拒：需同时按新班次组合重新提交打分
+    shift_only = client.patch(f"/api/v1/inspections/{created['id']}", json={"shift": "中班"})
+    assert shift_only.status_code == 400
+
+    # 组合校验：池外项目、空组合、重复项、未知班次
+    assert (
+        client.put("/api/v1/meta/checklists/早班", json={"items": ["不存在的项"]}).status_code
+        == 400
+    )
+    assert client.put("/api/v1/meta/checklists/早班", json={"items": []}).status_code == 422
+    assert (
+        client.put(
+            "/api/v1/meta/checklists/早班", json={"items": ["垃圾清运", "垃圾清运"]}
+        ).status_code
+        == 400
+    )
+    assert (
+        client.put("/api/v1/meta/checklists/夜班", json={"items": ["垃圾清运"]}).status_code
+        == 400
+    )
+
+    # 组合无变化时不产生新版本；历史版本可回溯
+    again = client.put("/api/v1/meta/checklists/早班", json={"items": new_items}).json()
+    assert again["version"] == 2
+    history = client.get("/api/v1/meta/checklists/history", params={"shift": "早班"}).json()
+    assert [row["version"] for row in history] == [2, 1]
+
+    # 恢复早班默认组合，避免影响后续用例（生成 v3）
+    from app.core.constants import DEFAULT_SHIFT_CHECKLISTS
+
+    restored = client.put(
+        "/api/v1/meta/checklists/早班", json={"items": DEFAULT_SHIFT_CHECKLISTS["早班"]}
+    ).json()
+    assert restored["items"] == DEFAULT_SHIFT_CHECKLISTS["早班"]
+
+
+def test_shift_comparison(client, restroom):
+    # 可比项目 = 三个班次现行组合的交集（默认组合下为这三项）
+    payload = client.get("/api/v1/stats/shift-comparison").json()
+    assert payload["comparable_items"] == ["地面与台阶清洁", "便池蹲位清洁", "垃圾清运"]
+    assert payload["rule_note"]
+
+    # 用同一批原始数据按固定规则手算，验证接口折算结果
+    all_items = client.get("/api/v1/inspections", params={"page_size": 100}).json()["items"]
+    comparable = set(payload["comparable_items"])
+    for row in payload["shifts"]:
+        records = [item for item in all_items if item["shift"] == row["shift"]]
+        assert row["inspection_count"] == len(records)
+        picked = []
+        for record in records:
+            scores = [entry["score"] for entry in record["items"] if entry["name"] in comparable]
+            if scores:
+                picked.append(sum(scores) / (len(scores) * 10) * 100)
+        expected = round(sum(picked) / len(picked), 1) if picked else 0.0
+        assert row["comparable_avg_score"] == expected
+        raw = [record["score"] for record in records]
+        assert row["avg_score"] == (round(sum(raw) / len(raw), 1) if raw else 0.0)
+
+    # 同一批数据重复调用，折算结果完全一致，不会出现两个均分
+    again = client.get("/api/v1/stats/shift-comparison").json()
+    assert again == payload

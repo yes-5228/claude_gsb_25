@@ -61,3 +61,6 @@ class InspectionOut(BaseModel):
     remark: str | None = None
     created_at: datetime
     issue_count: int = 0
+    checklist_version: int | None = Field(
+        default=None, description="提交时使用的检查项组合版本号；为空表示组合功能上线前的记录"
+    )

@@ -13,6 +13,7 @@ import { useAsync } from '../../hooks/useAsync.js';
 import { useDictionaries } from '../../hooks/useDictionaries.js';
 import { useListQuery } from '../../hooks/useListQuery.js';
 import { formatDateTime } from '../../utils/format.js';
+import ChecklistSettingsModal from './ChecklistSettingsModal.jsx';
 import InspectionDetailModal from './InspectionDetailModal.jsx';
 import InspectionFormModal from './InspectionFormModal.jsx';
 
@@ -30,6 +31,7 @@ export default function InspectionListPage() {
   const toast = useToast();
   const navigate = useNavigate();
   const [showForm, setShowForm] = useState(false);
+  const [showChecklists, setShowChecklists] = useState(false);
   const [active, setActive] = useState(null);
 
   const list = useListQuery((params) => inspectionApi.list(params), DEFAULT_FILTERS, 10);
@@ -50,11 +52,16 @@ export default function InspectionListPage() {
     <>
       <PageHeader
         title="保洁巡查记录"
-        description="按班次记录保洁质量评分，自动折算百分制得分并判定是否异常"
+        description="按班次组合记录保洁质量评分，自动折算百分制得分并判定是否异常"
         actions={
-          <button type="button" className="btn btn-primary" onClick={() => setShowForm(true)}>
-            + 新增巡查记录
-          </button>
+          <div className="inline">
+            <button type="button" className="btn" onClick={() => setShowChecklists(true)}>
+              检查项组合
+            </button>
+            <button type="button" className="btn btn-primary" onClick={() => setShowForm(true)}>
+              + 新增巡查记录
+            </button>
+          </div>
         }
       />
       <div className="content">
@@ -181,6 +188,10 @@ export default function InspectionListPage() {
 
       {showForm ? (
         <InspectionFormModal onClose={() => setShowForm(false)} onSaved={list.reload} />
+      ) : null}
+
+      {showChecklists ? (
+        <ChecklistSettingsModal onClose={() => setShowChecklists(false)} onSaved={list.reload} />
       ) : null}
 
       {active ? (

@@ -12,13 +12,15 @@ from app.api.v1 import api_router
 from app.core.config import settings
 from app.core.database import SessionLocal, init_db
 from app.core.exceptions import DomainError
+from app.services import checklist_service
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    if settings.seed_on_startup:
-        with SessionLocal() as db:
+    with SessionLocal() as db:
+        checklist_service.ensure_default_checklists(db)
+        if settings.seed_on_startup:
             seed.seed_database(db)
     yield
 

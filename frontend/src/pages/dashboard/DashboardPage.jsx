@@ -13,6 +13,7 @@ import {
   RankingPanel,
   RecentInspectionsPanel,
   RecentIssuesPanel,
+  ShiftComparisonPanel,
 } from './DashboardPanels.jsx';
 
 const RANGE_OPTIONS = [7, 14, 30];
@@ -23,6 +24,7 @@ export default function DashboardPage() {
     () => statsApi.dashboard(trendDays),
     [trendDays],
   );
+  const { data: shiftComparison } = useAsync(() => statsApi.shiftComparison(), []);
 
   const overview = data?.overview;
 
@@ -125,6 +127,8 @@ export default function DashboardPage() {
               <DistrictPanel items={data.districts} />
               <RankingPanel items={data.top_restrooms} />
             </div>
+
+            <ShiftComparisonPanel data={shiftComparison} />
 
             <div className="grid-2">
               <RecentIssuesPanel items={data.recent_issues} />

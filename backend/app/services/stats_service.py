@@ -6,11 +6,14 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.constants import (
+    COMPARABLE_SCORE_RULE,
+    INSPECTION_ITEM_MAX_SCORE,
     OPEN_ISSUE_STATUSES,
     IssueCategory,
     IssueSeverity,
     IssueStatus,
     RestroomStatus,
+    Shift,
 )
 from app.models import Inspection, Issue, Restroom
 from app.schemas.stats import (
@@ -20,9 +23,11 @@ from app.schemas.stats import (
     NameValue,
     OverviewStats,
     RestroomRankItem,
+    ShiftComparison,
+    ShiftScoreRow,
     TrendPoint,
 )
-from app.services import inspection_service, issue_service
+from app.services import checklist_service, inspection_service, issue_service
 
 
 def _count(db: Session, model, *conditions) -> int:
@@ -155,6 +160,54 @@ def inspection_trend(db: Session, days: int = 14) -> list[TrendPoint]:
             )
         )
     return points
+
+
+def shift_comparison(db: Session) -> ShiftComparison:
+    """跨班次均分对比。
+
+    折算规则固定：可比项目 = 各班次现行组合的交集（由 checklist_service 单点给出），
+    每条记录只取可比项目的打分折算百分制再求平均；不含可比项目的记录不计入。
+    可比项目清单与规则说明随结果返回，同一批数据只会折算出一个均分。
+    """
+    currents = {version.shift: version for version in checklist_service.list_current(db)}
+    comparable = checklist_service.comparable_items(db)
+    comparable_set = set(comparable)
+
+    rows: list[ShiftScoreRow] = []
+    for shift in Shift:
+        inspections = list(db.scalars(select(Inspection).where(Inspection.shift == shift.value)))
+        raw_scores = [float(inspection.score or 0) for inspection in inspections]
+        comparable_scores: list[float] = []
+        for inspection in inspections:
+            picked = [
+                float(entry["score"])
+                for entry in (inspection.items or [])
+                if entry.get("name") in comparable_set
+            ]
+            if picked:
+                comparable_scores.append(
+                    sum(picked) / (len(picked) * INSPECTION_ITEM_MAX_SCORE) * 100
+                )
+        current = currents.get(shift.value)
+        rows.append(
+            ShiftScoreRow(
+                shift=shift.value,
+                inspection_count=len(inspections),
+                checklist_item_count=len(current.items) if current else 0,
+                avg_score=round(sum(raw_scores) / len(raw_scores), 1) if raw_scores else 0.0,
+                comparable_count=len(comparable_scores),
+                comparable_avg_score=(
+                    round(sum(comparable_scores) / len(comparable_scores), 1)
+                    if comparable_scores
+                    else 0.0
+                ),
+            )
+        )
+    return ShiftComparison(
+        comparable_items=comparable,
+        rule_note=COMPARABLE_SCORE_RULE,
+        shifts=rows,
+    )
 
 
 def district_stats(db: Session) -> list[DistrictStat]:

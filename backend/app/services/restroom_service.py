@@ -9,6 +9,7 @@ from app.core.constants import OPEN_ISSUE_STATUSES
 from app.core.exceptions import ConflictError, DomainError, NotFoundError
 from app.models import Inspection, Issue, Restroom
 from app.schemas.restroom import RestroomCreate, RestroomDetail, RestroomOut, RestroomUpdate
+from app.services import scoring
 
 SORTABLE_FIELDS = {
     "code": Restroom.code,
@@ -121,9 +122,13 @@ def get_restroom_detail(db: Session, restroom_id: int) -> RestroomDetail:
     inspection_count = db.scalar(
         select(func.count()).select_from(Inspection).where(Inspection.restroom_id == restroom_id)
     ) or 0
-    avg_score = db.scalar(
-        select(func.avg(Inspection.score)).where(Inspection.restroom_id == restroom_id)
+    avg_rows = list(
+        db.scalars(select(Inspection).where(Inspection.restroom_id == restroom_id))
     )
+    avg_score, avg_excluded = scoring.comparable_average(
+        [list(row.items or []) for row in avg_rows]
+    )
+    avg_included = len(avg_rows) - avg_excluded
     latest = db.scalars(
         select(Inspection)
         .where(Inspection.restroom_id == restroom_id)
@@ -145,7 +150,9 @@ def get_restroom_detail(db: Session, restroom_id: int) -> RestroomDetail:
         inspection_count=inspection_count,
         latest_inspection_time=latest.inspect_time if latest else None,
         latest_inspection_score=latest.score if latest else None,
-        avg_score=round(float(avg_score), 1) if avg_score is not None else None,
+        avg_score=round(avg_score, 1) if avg_included else None,
+        avg_score_included_count=avg_included,
+        avg_score_excluded_count=avg_excluded,
         open_issue_count=open_issue_count,
         total_issue_count=total_issue_count,
     )

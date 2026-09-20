@@ -11,6 +11,16 @@ class NameValue(BaseModel):
     value: float
 
 
+class ComparableScoreBasis(BaseModel):
+    """跨班次均分的固定折算口径说明。"""
+
+    mode: str = Field(default="comparable", description="折算方式：comparable=固定可比项目折算")
+    comparable_items: list[str] = Field(default_factory=list, description="折算所依据的可比项目")
+    rule: str = Field(default="", description="折算规则与依据的文字说明")
+    included_count: int = Field(default=0, description="纳入折算的巡查记录数")
+    excluded_count: int = Field(default=0, description="因未覆盖全部可比项目被剔除的记录数")
+
+
 class OverviewStats(BaseModel):
     restroom_total: int = 0
     restroom_open: int = 0
@@ -31,6 +41,9 @@ class TrendPoint(BaseModel):
     inspections: int = 0
     issues: int = 0
     avg_score: float = 0.0
+    score_excluded: int = Field(
+        default=0, description="当日因未覆盖全部可比项目未参与均分的记录数"
+    )
 
 
 class CategoryStat(BaseModel):
@@ -61,6 +74,10 @@ class DashboardStats(BaseModel):
     """看板一次拉取所需的全部指标。"""
 
     overview: OverviewStats
+    score_basis: ComparableScoreBasis = Field(
+        default_factory=ComparableScoreBasis,
+        description="看板内所有跨班次均分统一遵循的固定可比项目折算口径",
+    )
     issue_by_status: list[NameValue] = Field(default_factory=list)
     issue_by_category: list[CategoryStat] = Field(default_factory=list)
     issue_by_severity: list[NameValue] = Field(default_factory=list)

@@ -32,10 +32,25 @@ export default function InspectionFormModal({ defaultRestroomId, onClose, onSave
       .catch((err) => setError(err.message));
   }, []);
 
+  const shiftConfigs = dictionaries?.shift_check_items || [];
+  const activeConfig = useMemo(
+    () => shiftConfigs.find((c) => c.shift === form.shift),
+    [shiftConfigs, form.shift],
+  );
+  const activeItems = activeConfig?.check_items || [];
+  const comparableItems = dictionaries?.comparable_items || [];
+
+  // 切换班次或字典首次加载时，按该班次当前组合整套展开评分项；
+  // 与旧草稿同名的项目保留已填分数，其余给默认分。一条录入始终绑定同一版组合。
   useEffect(() => {
-    const template = dictionaries?.inspection_check_items || [];
-    setItems(template.map((name) => ({ name, score: 9, remark: '' })));
-  }, [dictionaries]);
+    if (!activeItems.length) return;
+    setItems((prev) =>
+      activeItems.map((name) => {
+        const existing = prev.find((item) => item.name === name);
+        return existing ? existing : { name, score: 9, remark: '' };
+      }),
+    );
+  }, [activeItems.join('|')]);
 
   const score = useMemo(() => calcScore(items), [items]);
   const grade = gradeOf(score);
@@ -61,6 +76,10 @@ export default function InspectionFormModal({ defaultRestroomId, onClose, onSave
     }
     if (!form.inspector.trim()) {
       setError('请填写巡查人');
+      return;
+    }
+    if (items.length !== activeItems.length) {
+      setError('检查项尚未按当前班次组合加载完成，请稍后再提交');
       return;
     }
     setSaving(true);
@@ -142,7 +161,10 @@ export default function InspectionFormModal({ defaultRestroomId, onClose, onSave
       <div className="card-title">
         <div className="inline">
           <h3>检查项评分（每项 0-10 分）</h3>
-          <span className="tag tag-primary">当前得分 {score.toFixed(1)}</span>
+          <span className="tag tag-primary">
+            {form.shift}当前组合 v{activeConfig?.version ?? '-'} · {items.length} 项
+          </span>
+          <span className="tag">当前得分 {score.toFixed(1)}</span>
           <GradeTag grade={grade} />
           <StatusTag status={result} />
         </div>
@@ -159,7 +181,14 @@ export default function InspectionFormModal({ defaultRestroomId, onClose, onSave
       <div className="check-grid">
         {items.map((item, index) => (
           <div className={`check-item${item.score < 6 ? ' is-low' : ''}`} key={item.name}>
-            <div className="name">{item.name}</div>
+            <div className="name">
+              {item.name}
+              {comparableItems.includes(item.name) ? (
+                <span className="tag" style={{ marginLeft: 6, fontSize: 11 }} title="跨班次折算固定可比项">
+                  可比
+                </span>
+              ) : null}
+            </div>
             <div className="score-line">
               <input
                 type="range"

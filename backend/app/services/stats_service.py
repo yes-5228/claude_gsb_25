@@ -1,4 +1,8 @@
-"""统计看板业务逻辑。"""
+"""统计看板业务逻辑。
+
+凡涉及跨班次（或跨不同检查项组合版本）的均分，一律按 scoring 中的固定可比项目
+折算，折算口径随 score_basis 返回，保证同一批数据只有一个均分。
+"""
 
 from datetime import date, datetime, time, timedelta
 
@@ -6,6 +10,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.constants import (
+    INSPECTION_COMPARABLE_ITEMS,
+    INSPECTION_COMPARABLE_RULE,
     OPEN_ISSUE_STATUSES,
     IssueCategory,
     IssueSeverity,
@@ -15,6 +21,7 @@ from app.core.constants import (
 from app.models import Inspection, Issue, Restroom
 from app.schemas.stats import (
     CategoryStat,
+    ComparableScoreBasis,
     DashboardStats,
     DistrictStat,
     NameValue,
@@ -22,7 +29,7 @@ from app.schemas.stats import (
     RestroomRankItem,
     TrendPoint,
 )
-from app.services import inspection_service, issue_service
+from app.services import inspection_service, issue_service, scoring
 
 
 def _count(db: Session, model, *conditions) -> int:
@@ -30,6 +37,23 @@ def _count(db: Session, model, *conditions) -> int:
     if conditions:
         stmt = stmt.where(*conditions)
     return db.scalar(stmt) or 0
+
+
+def _avg(rows: list[Inspection]) -> tuple[float, int]:
+    """对一组巡查按固定可比项目折算均分，返回 (均分, 剔除数)。"""
+    return scoring.comparable_average([list(row.items or []) for row in rows])
+
+
+def score_basis(db: Session) -> ComparableScoreBasis:
+    """全库统一的折算口径：纳入/剔除计数基于全部巡查。"""
+    all_rows = list(db.scalars(select(Inspection)))
+    _, excluded = _avg(all_rows)
+    return ComparableScoreBasis(
+        comparable_items=list(INSPECTION_COMPARABLE_ITEMS),
+        rule=INSPECTION_COMPARABLE_RULE,
+        included_count=len(all_rows) - excluded,
+        excluded_count=excluded,
+    )
 
 
 def overview(db: Session) -> OverviewStats:
@@ -51,6 +75,11 @@ def overview(db: Session) -> OverviewStats:
     closed_count = _count(db, Issue, Issue.status == IssueStatus.CLOSED.value)
     finished = done_count + closed_count
 
+    week_rows = list(
+        db.scalars(select(Inspection).where(Inspection.inspect_time >= week_start))
+    )
+    avg_score_week, _ = _avg(week_rows)
+
     return OverviewStats(
         restroom_total=_count(db, Restroom),
         restroom_open=_count(db, Restroom, Restroom.status == RestroomStatus.NORMAL.value),
@@ -58,15 +87,7 @@ def overview(db: Session) -> OverviewStats:
         inspection_total=_count(db, Inspection),
         inspection_today=_count(db, Inspection, Inspection.inspect_time >= today_start),
         inspection_week=_count(db, Inspection, Inspection.inspect_time >= week_start),
-        avg_score_week=round(
-            float(
-                db.scalar(
-                    select(func.avg(Inspection.score)).where(Inspection.inspect_time >= week_start)
-                )
-                or 0.0
-            ),
-            1,
-        ),
+        avg_score_week=avg_score_week,
         issue_total=issue_total,
         issue_open=issue_open,
         issue_overdue=issue_overdue,
@@ -122,22 +143,23 @@ def inspection_trend(db: Session, days: int = 14) -> list[TrendPoint]:
     start = today - timedelta(days=days - 1)
     start_dt = datetime.combine(start, time.min)
 
-    inspection_rows = db.execute(
-        select(Inspection.inspect_time, Inspection.score).where(Inspection.inspect_time >= start_dt)
-    ).all()
+    inspection_rows = list(
+        db.scalars(
+            select(Inspection).where(Inspection.inspect_time >= start_dt)
+        )
+    )
     issue_rows = db.execute(
         select(Issue.report_time).where(Issue.report_time >= start_dt)
     ).all()
 
-    buckets: dict[str, dict[str, float]] = {}
+    buckets: dict[str, dict] = {}
     for offset in range(days):
         key = (start + timedelta(days=offset)).isoformat()
-        buckets[key] = {"inspections": 0, "issues": 0, "score_sum": 0.0}
-    for inspect_time, score in inspection_rows:
-        key = inspect_time.date().isoformat()
+        buckets[key] = {"inspections": [], "issues": 0}
+    for inspection in inspection_rows:
+        key = inspection.inspect_time.date().isoformat()
         if key in buckets:
-            buckets[key]["inspections"] += 1
-            buckets[key]["score_sum"] += float(score or 0)
+            buckets[key]["inspections"].append(inspection)
     for (report_time,) in issue_rows:
         key = report_time.date().isoformat()
         if key in buckets:
@@ -145,13 +167,15 @@ def inspection_trend(db: Session, days: int = 14) -> list[TrendPoint]:
 
     points: list[TrendPoint] = []
     for key, bucket in buckets.items():
-        count = int(bucket["inspections"])
+        day_rows: list[Inspection] = bucket["inspections"]
+        avg_score, excluded = _avg(day_rows)
         points.append(
             TrendPoint(
                 date=key,
-                inspections=count,
+                inspections=len(day_rows),
                 issues=int(bucket["issues"]),
-                avg_score=round(bucket["score_sum"] / count, 1) if count else 0.0,
+                avg_score=avg_score,
+                score_excluded=excluded,
             )
         )
     return points
@@ -169,12 +193,15 @@ def district_stats(db: Session) -> list[DistrictStat]:
         .group_by(Restroom.district)
     ).all()
     opens = {district: int(count) for district, count in open_rows}
-    score_rows = db.execute(
-        select(Restroom.district, func.avg(Inspection.score))
-        .join(Inspection, Inspection.restroom_id == Restroom.id)
-        .group_by(Restroom.district)
-    ).all()
-    scores = {district: float(avg or 0) for district, avg in score_rows}
+
+    district_by_id = dict(db.execute(select(Restroom.id, Restroom.district)).all())
+    inspections = list(db.scalars(select(Inspection)))
+    by_district: dict[str, list[Inspection]] = {}
+    for inspection in inspections:
+        district = district_by_id.get(inspection.restroom_id)
+        if district is not None:
+            by_district.setdefault(district, []).append(inspection)
+    scores = {district: _avg(rows)[0] for district, rows in by_district.items()}
 
     return sorted(
         [
@@ -192,15 +219,12 @@ def district_stats(db: Session) -> list[DistrictStat]:
 
 
 def restroom_ranking(db: Session, limit: int = 8) -> list[RestroomRankItem]:
-    inspections = db.execute(
-        select(
-            Inspection.restroom_id,
-            func.count(Inspection.id),
-            func.avg(Inspection.score),
-        ).group_by(Inspection.restroom_id)
-    ).all()
+    inspections = list(db.scalars(select(Inspection)))
+    grouped: dict[int, list[Inspection]] = {}
+    for inspection in inspections:
+        grouped.setdefault(inspection.restroom_id, []).append(inspection)
     stats = {
-        rid: {"count": int(count), "avg": round(float(avg or 0), 1)} for rid, count, avg in inspections
+        rid: {"count": len(rows), "avg": _avg(rows)[0]} for rid, rows in grouped.items()
     }
     open_rows = db.execute(
         select(Issue.restroom_id, func.count())
@@ -234,6 +258,7 @@ def dashboard(db: Session, trend_days: int = 14) -> DashboardStats:
     )
     return DashboardStats(
         overview=overview(db),
+        score_basis=score_basis(db),
         issue_by_status=issue_by_status(db),
         issue_by_category=issue_by_category(db),
         issue_by_severity=issue_by_severity(db),

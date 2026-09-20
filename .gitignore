@@ -42,3 +42,6 @@ traces/
 db.sqlite3
 *.sqlite3
 .venv
+
+# 运行时数据库目录（SQLite 数据文件）
+backend/data/

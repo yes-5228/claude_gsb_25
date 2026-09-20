@@ -7,7 +7,6 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.constants import (
-    INSPECTION_CHECK_ITEMS,
     IssueCategory,
     IssueSeverity,
     IssueStatus,
@@ -19,7 +18,12 @@ from app.models import Restroom
 from app.schemas.inspection import InspectionCreate, InspectionItem
 from app.schemas.issue import IssueCreate, IssueStatusUpdate
 from app.schemas.restroom import RestroomCreate
-from app.services import inspection_service, issue_service, restroom_service
+from app.services import (
+    inspection_service,
+    issue_service,
+    restroom_service,
+    shift_config_service,
+)
 
 RANDOM_SEED = 20240913
 
@@ -80,9 +84,9 @@ CATEGORY_BY_ITEM = {
 }
 
 
-def _build_items(rng: random.Random, quality: float) -> list[InspectionItem]:
+def _build_items(rng: random.Random, quality: float, check_items: list[str]) -> list[InspectionItem]:
     items: list[InspectionItem] = []
-    for name in INSPECTION_CHECK_ITEMS:
+    for name in check_items:
         score = quality + rng.uniform(-1.6, 1.4)
         items.append(InspectionItem(name=name, score=max(0, min(10, round(score)))))
     return items
@@ -129,6 +133,11 @@ def seed_database(db: Session, *, reset: bool = False) -> int:
     quality_by_restroom = {room.id: rng.uniform(7.4, 9.8) for room in restrooms}
     inspection_ids: list[tuple[int, int]] = []  # (restroom_id, inspection_id)
 
+    shift_config_service.ensure_defaults(db)
+    shift_items = {
+        shift.value: shift_config_service.current_items(db, shift.value)[0] for shift in Shift
+    }
+
     for offset in range(13, -1, -1):
         day = now - timedelta(days=offset)
         for room in restrooms:
@@ -139,13 +148,14 @@ def seed_database(db: Session, *, reset: bool = False) -> int:
             quality = quality_by_restroom[room.id] + rng.uniform(-1.0, 0.6)
             if rng.random() < 0.18:
                 quality -= 2.6
-            items = _build_items(rng, quality)
+            shift = rng.choice(list(Shift))
+            items = _build_items(rng, quality, shift_items[shift.value])
             inspection = inspection_service.create_inspection(
                 db,
                 InspectionCreate(
                     restroom_id=room.id,
                     inspector=rng.choice(INSPECTORS),
-                    shift=rng.choice(list(Shift)),
+                    shift=shift,
                     inspect_time=day.replace(
                         hour=rng.choice([8, 10, 14, 16, 19]), minute=rng.choice([5, 20, 35, 50])
                     ),

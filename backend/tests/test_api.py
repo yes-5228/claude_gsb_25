@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta
 
-from tests.conftest import full_items
+from tests.conftest import full_items, shift_items
 
 
 def test_health_and_dictionaries(client):
@@ -11,6 +11,15 @@ def test_health_and_dictionaries(client):
     assert "待整改" in payload["issue_status"]
     assert len(payload["inspection_check_items"]) == 8
     assert payload["issue_transitions"]["待整改"] == ["整改中", "已关闭"]
+    # 各班次组合不同
+    combo = {item["shift"]: item["check_items"] for item in payload["shift_check_items"]}
+    assert len(combo["早班"]) == 8
+    assert len(combo["中班"]) == 6
+    assert len(combo["晚班"]) == 6
+    assert combo["早班"] != combo["中班"]
+    # 固定可比项目与折算规则
+    assert payload["comparable_items"] == ["地面与台阶清洁", "便池蹲位清洁", "垃圾清运"]
+    assert "可比" in payload["comparable_rule"]
 
 
 def test_restroom_crud_and_delete_guard(client, restroom):
@@ -54,15 +63,18 @@ def test_inspection_scoring_and_filter(client, restroom):
             "restroom_id": restroom["id"],
             "inspector": "李巡查",
             "shift": "中班",
-            "items": full_items(9),
+            "items": shift_items(client, "中班", 9),
             "remark": "整体良好",
         },
     ).json()
     assert good["score"] == 90.0
     assert good["grade"] == "优秀"
     assert good["result"] == "正常"
+    # 记录绑定提交时中班的组合快照与版本号
+    assert len(good["check_items"]) == 6
+    assert good["check_config_version"] >= 1
 
-    bad_items = full_items(9)
+    bad_items = shift_items(client, "晚班", 9)
     bad_items[0]["score"] = 3
     bad_items[0]["remark"] = "地面污渍"
     bad = client.post(
@@ -90,12 +102,40 @@ def test_inspection_scoring_and_filter(client, restroom):
     ).json()
     assert ranged["meta"]["total"] == 2
 
-    duplicate = full_items(5) + [{"name": "地面与台阶清洁", "score": 4}]
+    # 提交项目与班次当前组合不一致（重复项）被拒绝
+    duplicate = shift_items(client, "中班", 5) + [
+        {"name": "地面与台阶清洁", "score": 4}
+    ]
     rejected = client.post(
         "/api/v1/inspections",
-        json={"restroom_id": restroom["id"], "inspector": "李巡查", "items": duplicate},
+        json={"restroom_id": restroom["id"], "inspector": "李巡查", "shift": "中班", "items": duplicate},
     )
     assert rejected.status_code == 400
+
+    # 中班只收 6 项，按早班 8 项提交被拒绝，不允许部分提交
+    wrong_combo = client.post(
+        "/api/v1/inspections",
+        json={
+            "restroom_id": restroom["id"],
+            "inspector": "李巡查",
+            "shift": "中班",
+            "items": full_items(9),
+        },
+    )
+    assert wrong_combo.status_code == 400
+    assert "组合不一致" in wrong_combo.json()["detail"]
+
+    # 中班只提交组合中的一部分同样被拒绝
+    partial = client.post(
+        "/api/v1/inspections",
+        json={
+            "restroom_id": restroom["id"],
+            "inspector": "李巡查",
+            "shift": "中班",
+            "items": shift_items(client, "中班", 9)[:3],
+        },
+    )
+    assert partial.status_code == 400
 
     empty = client.post(
         "/api/v1/inspections",

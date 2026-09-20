@@ -75,5 +75,11 @@ class RestroomDetail(RestroomOut):
     latest_inspection_time: datetime | None = None
     latest_inspection_score: float | None = None
     avg_score: float | None = None
+    avg_score_included_count: int = Field(
+        default=0, description="参与跨班次可比均分的巡查记录数"
+    )
+    avg_score_excluded_count: int = Field(
+        default=0, description="因未覆盖全部可比项目未参与均分的记录数"
+    )
     open_issue_count: int = 0
     total_issue_count: int = 0

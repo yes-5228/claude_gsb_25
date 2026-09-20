@@ -25,6 +25,12 @@ class Inspection(Base):
     )
     shift: Mapped[str] = mapped_column(String(20), default=Shift.MORNING.value, comment="班次")
     items: Mapped[list[dict]] = mapped_column(JSON, default=list, comment="检查项打分明细")
+    check_items: Mapped[list[str]] = mapped_column(
+        JSON, default=list, comment="提交时该班次生效的检查项组合快照"
+    )
+    check_config_version: Mapped[int] = mapped_column(
+        Integer, default=1, comment="提交时班次检查项组合的版本号"
+    )
     score: Mapped[float] = mapped_column(Float, default=0.0, comment="巡查得分")
     grade: Mapped[str] = mapped_column(String(20), default="", comment="评分等级")
     result: Mapped[str] = mapped_column(

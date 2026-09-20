@@ -850,3 +850,52 @@ table.data-table td.wrap {
     white-space: nowrap;
   }
 }
+
+/* 跨班次均分折算口径说明 */
+.score-basis {
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin: 4px 0 16px;
+}
+
+.score-basis-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #075985;
+  margin-bottom: 4px;
+}
+
+/* 班次检查项配置 */
+.shift-config-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.check-config-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 14px;
+}
+
+.check-config-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  cursor: pointer;
+}
+
+.check-config-item.is-on {
+  border-color: #0f766e;
+  background: #f0fdfa;
+}
+
+.check-config-item input {
+  margin: 0;
+}

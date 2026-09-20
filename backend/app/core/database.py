@@ -4,7 +4,7 @@ import os
 from collections.abc import Generator
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.config import settings
@@ -56,3 +56,40 @@ def init_db() -> None:
     from app import models  # noqa: F401  确保模型完成注册
 
     Base.metadata.create_all(bind=engine)
+    _ensure_inspection_snapshot_columns()
+
+
+def _ensure_inspection_snapshot_columns() -> None:
+    """为旧版数据库补齐班次组合快照列（SQLite/PostgreSQL 通用的轻量迁移）。"""
+
+    inspector = inspect(engine)
+    if "inspections" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("inspections")}
+    is_sqlite = engine.dialect.name == "sqlite"
+    json_type = "TEXT" if is_sqlite else "JSON"
+    missing_sql = {
+        "check_items": f"ALTER TABLE inspections ADD COLUMN check_items {json_type}",
+        "check_config_version": "ALTER TABLE inspections ADD COLUMN check_config_version INTEGER DEFAULT 1",
+    }
+    with engine.begin() as conn:
+        for name, sql in missing_sql.items():
+            if name not in existing:
+                conn.execute(text(sql))
+
+
+def backfill_legacy_inspection_snapshots(session: Session) -> int:
+    """把没有组合快照的旧巡查按其实际打分明细回填（视为 v1 组合），返回回填条数。"""
+
+    from app.models import Inspection
+
+    rows = list(session.scalars(select(Inspection)))
+    changed = 0
+    for row in rows:
+        if not row.check_items and row.items:
+            row.check_items = [str(item.get("name")) for item in row.items if item.get("name")]
+            row.check_config_version = row.check_config_version or 1
+            changed += 1
+    if changed:
+        session.commit()
+    return changed

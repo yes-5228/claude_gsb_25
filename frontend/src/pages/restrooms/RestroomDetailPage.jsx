@@ -10,6 +10,7 @@ import PageHeader from '../../components/PageHeader.jsx';
 import Pagination from '../../components/Pagination.jsx';
 import { ScorePill, SeverityTag, StatusTag } from '../../components/Tags.jsx';
 import { useAsync } from '../../hooks/useAsync.js';
+import { useDictionaries } from '../../hooks/useDictionaries.js';
 import { useListQuery } from '../../hooks/useListQuery.js';
 import { formatDateTime } from '../../utils/format.js';
 import RestroomFormModal from './RestroomFormModal.jsx';
@@ -22,6 +23,7 @@ const TABS = [
 
 export default function RestroomDetailPage() {
   const { restroomId } = useParams();
+  const { dictionaries } = useDictionaries();
   const [tab, setTab] = useState('profile');
   const [showForm, setShowForm] = useState(false);
 
@@ -74,13 +76,17 @@ export default function RestroomDetailPage() {
                 </div>
               </div>
               <div className="stat-card is-info">
-                <div className="label">巡查均分</div>
+                <div className="label">跨班次可比均分</div>
                 <div className="value">
                   {restroom.avg_score != null ? restroom.avg_score.toFixed(1) : '-'}
                   <span className="unit">分</span>
                 </div>
-                <div className="foot">
-                  最近得分：{restroom.latest_inspection_score ?? '-'}
+                <div className="foot" title={dictionaries?.comparable_rule || ''}>
+                  可比项：{(dictionaries?.comparable_items || []).join('、') || '-'}
+                  {' '}· 纳入 {restroom.avg_score_included_count ?? 0} 条
+                  {restroom.avg_score_excluded_count
+                    ? ` · 剔除 ${restroom.avg_score_excluded_count} 条`
+                    : ''}
                 </div>
               </div>
               <div className={`stat-card${restroom.open_issue_count ? ' is-danger' : ''}`}>

@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 
 from app.core.constants import (
     INSPECTION_CHECK_ITEMS,
+    INSPECTION_COMPARABLE_ITEMS,
+    INSPECTION_COMPARABLE_RULE,
     INSPECTION_ITEM_MAX_SCORE,
     ISSUE_TRANSITIONS,
     IssueCategory,
@@ -18,7 +20,7 @@ from app.core.constants import (
     Shift,
 )
 from app.core.database import get_db
-from app.services import inspection_service
+from app.services import inspection_service, shift_config_service
 
 router = APIRouter(prefix="/meta", tags=["字典"])
 
@@ -30,6 +32,13 @@ class RestroomOption(BaseModel):
     district: str
 
 
+class ShiftCheckItems(BaseModel):
+    shift: str
+    version: int
+    check_items: list[str]
+    comparable_covered: bool
+
+
 class Dictionaries(BaseModel):
     restroom_status: list[str]
     restroom_grade: list[str]
@@ -39,11 +48,15 @@ class Dictionaries(BaseModel):
     issue_status: list[str]
     inspection_check_items: list[str]
     inspection_item_max_score: int
+    shift_check_items: list[ShiftCheckItems]
+    comparable_items: list[str]
+    comparable_rule: str
     issue_transitions: dict[str, list[str]]
 
 
 @router.get("/dictionaries", response_model=Dictionaries, summary="枚举字典")
-def get_dictionaries() -> Dictionaries:
+def get_dictionaries(db: Annotated[Session, Depends(get_db)]) -> Dictionaries:
+    configs = shift_config_service.list_configs(db)
     return Dictionaries(
         restroom_status=[item.value for item in RestroomStatus],
         restroom_grade=[item.value for item in RestroomGrade],
@@ -53,6 +66,17 @@ def get_dictionaries() -> Dictionaries:
         issue_status=[item.value for item in IssueStatus],
         inspection_check_items=list(INSPECTION_CHECK_ITEMS),
         inspection_item_max_score=INSPECTION_ITEM_MAX_SCORE,
+        shift_check_items=[
+            ShiftCheckItems(
+                shift=item.shift,
+                version=item.version,
+                check_items=item.check_items,
+                comparable_covered=item.comparable_covered,
+            )
+            for item in configs
+        ],
+        comparable_items=list(INSPECTION_COMPARABLE_ITEMS),
+        comparable_rule=INSPECTION_COMPARABLE_RULE,
         issue_transitions={key: list(value) for key, value in ISSUE_TRANSITIONS.items()},
     )
 

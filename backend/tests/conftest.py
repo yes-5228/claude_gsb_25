@@ -47,6 +47,14 @@ def restroom(client) -> dict:
 
 
 def full_items(score: float = 9.0) -> list[dict]:
-    from app.core.constants import INSPECTION_CHECK_ITEMS
+    """早班默认 8 项的打分明细（其余班次请用 shift_items）。"""
+    from app.core.constants import DEFAULT_SHIFT_CHECK_ITEMS, Shift
 
-    return [{"name": name, "score": score} for name in INSPECTION_CHECK_ITEMS]
+    return [{"name": name, "score": score} for name in DEFAULT_SHIFT_CHECK_ITEMS[Shift.MORNING]]
+
+
+def shift_items(client, shift: str, score: float = 9.0) -> list[dict]:
+    """按字典中某班次当前生效组合生成全套打分。"""
+    configs = client.get("/api/v1/meta/dictionaries").json()["shift_check_items"]
+    names = next(item["check_items"] for item in configs if item["shift"] == shift)
+    return [{"name": name, "score": score} for name in names]

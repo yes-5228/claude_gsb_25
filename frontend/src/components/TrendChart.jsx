@@ -11,7 +11,11 @@ export default function TrendChart({ points }) {
     <>
       <div className="trend-chart">
         {points.map((point) => (
-          <div className="trend-col" key={point.date} title={`${point.date} 巡查 ${point.inspections} 次，问题 ${point.issues} 条，均分 ${point.avg_score}`}>
+          <div
+            className="trend-col"
+            key={point.date}
+            title={`${point.date} 巡查 ${point.inspections} 次，问题 ${point.issues} 条，可比均分 ${point.avg_score}${point.score_excluded ? `（${point.score_excluded} 条未覆盖可比项未计入）` : ''}`}
+          >
             <div className="trend-bars">
               <div
                 className="trend-bar"

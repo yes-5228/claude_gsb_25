@@ -55,6 +55,10 @@ class InspectionOut(BaseModel):
     shift: str
     inspect_time: datetime
     items: list[InspectionItem] = Field(default_factory=list)
+    check_items: list[str] = Field(
+        default_factory=list, description="提交时生效的检查项组合快照"
+    )
+    check_config_version: int = Field(default=1, description="提交时的组合版本号")
     score: float
     grade: str
     result: str

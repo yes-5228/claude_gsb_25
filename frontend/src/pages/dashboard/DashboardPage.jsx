@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { statsApi } from '../../api/stats.js';
 import BarList from '../../components/BarList.jsx';
 import PageHeader from '../../components/PageHeader.jsx';
+import ScoreBasisNotice from '../../components/ScoreBasisNotice.jsx';
 import StatCard from '../../components/StatCard.jsx';
 import TrendChart from '../../components/TrendChart.jsx';
 import { useAsync } from '../../hooks/useAsync.js';
@@ -65,11 +66,11 @@ export default function DashboardPage() {
                 foot={`今日 ${overview.inspection_today} 条 · 近 7 日 ${overview.inspection_week} 条`}
               />
               <StatCard
-                label="近 7 日均分"
+                label="近 7 日跨班次均分"
                 value={overview.avg_score_week.toFixed(1)}
                 unit="分"
                 tone={overview.avg_score_week >= 85 ? 'primary' : 'warning'}
-                foot="按百分制折算"
+                foot="按固定可比项目折算"
               />
               <StatCard
                 label="未闭环问题"
@@ -94,11 +95,13 @@ export default function DashboardPage() {
               />
             </div>
 
+            <ScoreBasisNotice basis={data.score_basis} />
+
             <div className="grid-2">
               <section className="card">
                 <div className="card-title">
                   <h3>巡查与问题趋势</h3>
-                  <span className="hint">近 {trendDays} 天</span>
+                  <span className="hint">近 {trendDays} 天 · 日均分为可比折算</span>
                 </div>
                 <TrendChart points={data.inspection_trend} />
               </section>
@@ -122,8 +125,8 @@ export default function DashboardPage() {
             </div>
 
             <div className="grid-2">
-              <DistrictPanel items={data.districts} />
-              <RankingPanel items={data.top_restrooms} />
+              <DistrictPanel items={data.districts} basis={data.score_basis} />
+              <RankingPanel items={data.top_restrooms} basis={data.score_basis} />
             </div>
 
             <div className="grid-2">

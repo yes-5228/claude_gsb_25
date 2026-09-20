@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 
 import BarList from '../../components/BarList.jsx';
 import DataTable from '../../components/DataTable.jsx';
+import ScoreBasisNotice from '../../components/ScoreBasisNotice.jsx';
 import { ScorePill, SeverityTag, StatusTag } from '../../components/Tags.jsx';
 import { formatDateTime } from '../../utils/format.js';
 
@@ -63,7 +64,7 @@ export function CategoryPanel({ items }) {
   );
 }
 
-export function DistrictPanel({ items }) {
+export function DistrictPanel({ items, basis }) {
   return (
     <section className="card">
       <div className="card-title">
@@ -77,7 +78,7 @@ export function DistrictPanel({ items }) {
           { key: 'issue_open', title: '未闭环' },
           {
             key: 'avg_score',
-            title: '巡查均分',
+            title: '跨班次均分',
             render: (row) => (row.avg_score ? <ScorePill score={row.avg_score} /> : '-'),
           },
         ]}
@@ -85,16 +86,19 @@ export function DistrictPanel({ items }) {
         rowKey={(row) => row.district}
         emptyText="暂无区域数据"
       />
+      <div style={{ marginTop: 8 }}>
+        <ScoreBasisNotice basis={basis} compact />
+      </div>
     </section>
   );
 }
 
-export function RankingPanel({ items }) {
+export function RankingPanel({ items, basis }) {
   return (
     <section className="card">
       <div className="card-title">
         <h3>重点关注公厕</h3>
-        <span className="hint">未闭环问题多、均分偏低</span>
+        <span className="hint">未闭环问题多、可比均分偏低</span>
       </div>
       <DataTable
         columns={[
@@ -107,7 +111,7 @@ export function RankingPanel({ items }) {
           { key: 'inspection_count', title: '巡查次数' },
           {
             key: 'avg_score',
-            title: '均分',
+            title: '可比均分',
             render: (row) => (row.avg_score ? <ScorePill score={row.avg_score} /> : '-'),
           },
           { key: 'open_issues', title: '未闭环' },
@@ -116,6 +120,9 @@ export function RankingPanel({ items }) {
         rowKey={(row) => row.restroom_id}
         emptyText="暂无数据"
       />
+      <div style={{ marginTop: 8 }}>
+        <ScoreBasisNotice basis={basis} compact />
+      </div>
     </section>
   );
 }
